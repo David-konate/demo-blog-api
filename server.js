@@ -13,44 +13,58 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Fonction de test Cloudinary au démarrage
-const testCloudinary = async () => {
-  try {
-    console.log("🔄 Test de Cloudinary en cours...");
-
-    const result = await cloudinary.uploader.upload(
-      "https://res.cloudinary.com/demo/image/upload/sample.jpg",
-      { folder: "tests" }
-    );
-
-    console.log(
-      "✅ Cloudinary fonctionne ! URL de l'image :",
-      result.secure_url
-    );
-  } catch (error) {
-    console.error("❌ Erreur lors du test Cloudinary :", error.message);
-  }
-};
-
-// Middleware CORS
-app.use(
-  cors({
-    origin: "http://localhost:8000", // ou l'URL de votre frontend Vue
-    methods: ["GET", "POST", "PUT", "DELETE"], // les méthodes HTTP autorisées
-    allowedHeaders: ["Content-Type", "Authorization"], // les en-têtes autorisés
-  })
-);
-
-app.get("/", (req, res) => {
-  res.send("Hello, API avec Yarn!");
+// Middleware de logs des requêtes
+app.use((req, res, next) => {
+  console.log(`📢 Requête reçue : ${req.method} ${req.originalUrl}`);
+  next();
 });
 
+// Middleware CORS
+const allowedOrigins = [
+  "https://www.blog.david-konate.fr", // Remplace par l'URL de ton frontend
+  "*", // Si tu testes en local
+];
+
+// app.use(
+//   cors({
+//     origin: (origin, callback) => {
+//       if (!origin || allowedOrigins.includes(origin)) {
+//         callback(null, true);
+//       } else {
+//         callback(new Error("⛔ CORS non autorisé"));
+//       }
+//     },
+//     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+//     allowedHeaders: ["Content-Type", "Authorization"],
+//     credentials: true, // Si tu utilises des sessions ou des cookies
+//   })
+// );
+
+// Middleware pour ajouter les headers CORS à toutes les réponses
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*"); // Change "*" par ton frontend si besoin
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  next();
+});
+
+// Gérer explicitement les requêtes OPTIONS (preflight CORS)
+app.options("*", (req, res) => {
+  res.sendStatus(204);
+});
+
+// Route principale
+app.get("/", (req, res) => {
+  res.send("Hello, API blog!");
+});
+
+// Routes des articles
 app.use("/api", articleRoutes);
 
-connectDB(); // Connexion à MongoDB
-testCloudinary(); // Test Cloudinary au démarrage
+// Connexion à MongoDB
+connectDB();
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`);
 });

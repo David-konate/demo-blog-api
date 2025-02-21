@@ -7,54 +7,132 @@ const getArticlePipeline = require("../utils/articlePipeline"); // Remplacer imp
 const router = express.Router();
 const Article = require("../models/articleModel"); // Chemin relatif vers votre modèle Article
 
+// Fonction pour uploader un fichier Markdown sur Cloudinary et mongoDB
+const uploadMarkdownFile = async (req, res) => {
+  try {
+    const markdownFile = req.files?.markdown?.[0]; // Vérification correcte du fichier
+    const slug = req.params.slug;
+
+    if (!markdownFile) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Fichier Markdown manquant." });
+    }
+
+    if (!slug) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Slug manquant." });
+    }
+
+    // Fonction pour extraire les métadonnées du contenu Markdown
+    const extractMetadata = (regex) => {
+      const match = markdownFile.buffer.toString().match(regex);
+      return match ? match[1].trim() : null;
+    };
+
+    const author = extractMetadata(/author:\s*"?(.+?)"?$/m) || "Auteur inconnu";
+    const date =
+      extractMetadata(/date:\s*"?(.+?)"?$/m) || new Date().toISOString();
+    const category = extractMetadata(/category:\s*"?(.+?)"?$/m) || "Non classé";
+    const image = extractMetadata(/image:\s*"?(.+?)"?$/m) || "";
+
+    // Téléchargement sur Cloudinary
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: "raw",
+        public_id: `${slug}.md`,
+        folder: `markdown_articles/${slug}`,
+      },
+      async (error, result) => {
+        if (error) {
+          return res.status(500).json({
+            status: "error",
+            message: "Erreur Cloudinary",
+            error: error.message,
+          });
+        }
+
+        try {
+          const article = new Article({
+            title: req.body.title || slug,
+            slug,
+            author,
+            date,
+            category,
+            image,
+            fileUrl: result.secure_url,
+          });
+
+          await article.save();
+
+          res.status(201).json({
+            status: "success",
+            message: "Article enregistré avec succès.",
+            article,
+          });
+        } catch (err) {
+          return res.status(500).json({
+            status: "error",
+            message: "Erreur MongoDB",
+            error: err.message,
+          });
+        }
+      }
+    );
+
+    // Envoi du fichier vers Cloudinary
+    stream.end(markdownFile.buffer);
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Erreur serveur",
+      error: error.message,
+    });
+  }
+};
+
 // Fonction pour récupérer les articles avec pagination et catégorie
 const getArticles = async (req, res) => {
   try {
     let { page = 1, category } = req.query;
     page = parseInt(page, 10);
-
-    // Validation des paramètres
-    if (isNaN(page) || page < 1) {
-      return res.status(400).json({ message: "Page invalide" });
-    }
-
     const limit = 3; // Nombre d'articles par page
     const skip = (page - 1) * limit;
 
-    // Création du filtre par catégorie (uniquement si elle est fournie)
-    let filter = {};
-    if (category && typeof category === "string" && category.trim() !== "") {
-      filter.category = category.trim();
+    // Vérification des paramètres
+    if (isNaN(page) || page < 1) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Page invalide." });
     }
 
-    // Récupération des articles paginés avec leurs métadonnées
+    // Filtrage par catégorie si fournie
+    const filter = category ? { category } : {};
+
+    // Récupération des articles avec pagination
     const articles = await Article.find(filter)
-      .sort({ createdAt: -1 }) // Tri par date de création (du plus récent au plus ancien)
+      .sort({ createdAt: -1 }) // Tri du plus récent au plus ancien
       .skip(skip)
       .limit(limit);
 
-    // Nombre total d'articles pour la pagination
     const totalArticles = await Article.countDocuments(filter);
 
     res.status(200).json({
       status: "success",
-      data: articles.map((article) => ({
-        title: article.title,
-        slug: article.slug,
-        category: article.category,
-        fileUrl: article.fileUrl,
-        createdAt: article.createdAt,
-        image: article.image,
-        author: article.author, // Auteur ajouté
-        date: article.date, // Date ajoutée
-      })),
+      data: articles,
       total: totalArticles,
       currentPage: page,
       totalPages: Math.ceil(totalArticles / limit),
     });
   } catch (error) {
-    console.error("❌ Erreur lors de la récupération des articles:", error);
-    res.status(500).json({ message: "Erreur serveur", error: error.message });
+    res
+      .status(500)
+      .json({
+        status: "error",
+        message: "Erreur serveur",
+        error: error.message,
+      });
   }
 };
 
@@ -64,28 +142,29 @@ const getArticleBySlug = async (req, res) => {
     const { slug } = req.params;
     console.log(`🔍 Recherche de l'article avec le slug: ${slug}`);
 
-    const article = await Article.findOne({ slug });
+    // Recherche de l'article avec insensibilité à la casse (si nécessaire)
+    const article = await Article.findOne({ title: slug.toLowerCase() }).select(
+      "title slug category fileUrl createdAt imlage author date"
+    );
+    console.log({ article });
 
     if (!article) {
-      return res.status(404).json({ message: "Article non trouvé" });
+      return res.status(404).json({
+        status: "error",
+        message: "Article non trouvé",
+      });
     }
-
     res.status(200).json({
       status: "success",
-      data: {
-        title: article.title,
-        slug: article.slug,
-        category: article.category,
-        fileUrl: article.fileUrl,
-        createdAt: article.createdAt,
-        image: article.image,
-        author: article.author, // Auteur ajouté
-        date: article.date, // Date ajoutée
-      },
+      data: article,
     });
   } catch (error) {
     console.error("❌ Erreur lors de la récupération de l'article:", error);
-    res.status(500).json({ message: "Erreur serveur", error: error.message });
+    res.status(500).json({
+      status: "error",
+      message: "Erreur serveur",
+      error: error.message,
+    });
   }
 };
 
@@ -158,97 +237,6 @@ const uploadImageTitle = async (req, res) => {
     return res.status(500).json({
       status: "error",
       message: "Une erreur inattendue s'est produite.",
-      error: error.message,
-    });
-  }
-};
-
-// Fonction pour uploader un fichier Markdown sur Cloudinary et mongoDB
-const uploadMarkdownFile = async (req, res) => {
-  try {
-    const markdownFile = req.files?.markdown?.[0]; // Récupération correcte du fichier
-    const slug = req.params.slug;
-
-    if (!markdownFile) {
-      return res.status(400).json({
-        status: "error",
-        message: "Fichier Markdown manquant.",
-      });
-    }
-
-    if (!slug) {
-      return res.status(400).json({
-        status: "error",
-        message: "Slug manquant.",
-      });
-    }
-
-    // Fonction pour extraire les métadonnées
-    const extractMetadata = (regex) => {
-      const match = markdownFile.buffer.toString().match(regex);
-      return match ? match[1] : null;
-    };
-
-    // Extraire les métadonnées du fichier Markdown
-    const author =
-      extractMetadata(/author:\s*"?(.+?)"?$/m) || "Auteur non trouvé";
-    const date = extractMetadata(/date:\s*"?(.+?)"?$/m) || "Date non trouvée";
-    const category =
-      extractMetadata(/category:\s*"?(.+?)"?$/m) || "Catégorie non trouvée";
-    const image = extractMetadata(/image:\s*"?(.+?)"?$/m) || "";
-
-    // Téléchargement du fichier Markdown sur Cloudinary
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        resource_type: "raw", // Type de fichier brut
-        public_id: `${slug}.md`, // Identifiant unique pour le fichier
-        folder: `markdown_articles/${slug}`, // Dossier spécifique sur Cloudinary
-      },
-      async (error, result) => {
-        if (error) {
-          return res.status(500).json({
-            status: "error",
-            message: "Erreur lors du téléchargement sur Cloudinary.",
-            error: error.message,
-          });
-        }
-
-        try {
-          // Créer un nouvel article dans la base de données avec les métadonnées extraites
-          const article = new Article({
-            title: req.body.title || slug, // Utiliser slug par défaut si title est manquant
-            slug: slug,
-            author: author, // Auteur extrait
-            date: date, // Date extraite
-            category: category, // Catégorie extraite
-            image: image, // Image extraite (si présente)
-            fileUrl: result.secure_url, // URL du fichier téléchargé
-          });
-
-          await article.save();
-
-          res.status(200).json({
-            status: "success",
-            message: "Fichier Markdown téléchargé avec succès.",
-            markdownUrl: result.secure_url,
-          });
-        } catch (err) {
-          return res.status(500).json({
-            status: "error",
-            message: "Erreur lors de l'enregistrement dans la base de données.",
-            error: err.message,
-          });
-        }
-      }
-    );
-
-    // Envoyer le fichier vers Cloudinary
-    stream.end(markdownFile.buffer);
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message:
-        "Une erreur est survenue lors de l'enregistrement du fichier Markdown.",
       error: error.message,
     });
   }
