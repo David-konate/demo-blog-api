@@ -7,7 +7,6 @@ const getArticlePipeline = require("../utils/articlePipeline"); // Remplacer imp
 const router = express.Router();
 const Article = require("../models/articleModel"); // Chemin relatif vers votre modèle Article
 
-// Fonction pour uploader un fichier Markdown sur Cloudinary et mongoDB
 const uploadMarkdownFile = async (req, res) => {
   try {
     const markdownFile = req.files?.markdown?.[0]; // Vérification correcte du fichier
@@ -25,7 +24,6 @@ const uploadMarkdownFile = async (req, res) => {
         .json({ status: "error", message: "Slug manquant." });
     }
 
-    // Fonction pour extraire les métadonnées du contenu Markdown
     const extractMetadata = (regex) => {
       const match = markdownFile.buffer.toString().match(regex);
       return match ? match[1].trim() : null;
@@ -37,7 +35,6 @@ const uploadMarkdownFile = async (req, res) => {
     const category = extractMetadata(/category:\s*"?(.+?)"?$/m) || "Non classé";
     const image = extractMetadata(/image:\s*"?(.+?)"?$/m) || "";
 
-    // Téléchargement sur Cloudinary
     const stream = cloudinary.uploader.upload_stream(
       {
         resource_type: "raw",
@@ -55,7 +52,7 @@ const uploadMarkdownFile = async (req, res) => {
 
         try {
           const article = new Article({
-            title: req.body.title || slug,
+            title: slug.replace(/-/g, " "), // Utiliser le slug comme titre par défaut
             slug,
             author,
             date,
@@ -81,7 +78,6 @@ const uploadMarkdownFile = async (req, res) => {
       }
     );
 
-    // Envoi du fichier vers Cloudinary
     stream.end(markdownFile.buffer);
   } catch (error) {
     res.status(500).json({
@@ -92,27 +88,23 @@ const uploadMarkdownFile = async (req, res) => {
   }
 };
 
-// Fonction pour récupérer les articles avec pagination et catégorie
 const getArticles = async (req, res) => {
   try {
     let { page = 1, category } = req.query;
     page = parseInt(page, 10);
-    const limit = 3; // Nombre d'articles par page
+    const limit = 3;
     const skip = (page - 1) * limit;
 
-    // Vérification des paramètres
     if (isNaN(page) || page < 1) {
       return res
         .status(400)
         .json({ status: "error", message: "Page invalide." });
     }
 
-    // Filtrage par catégorie si fournie
     const filter = category ? { category } : {};
 
-    // Récupération des articles avec pagination
     const articles = await Article.find(filter)
-      .sort({ createdAt: -1 }) // Tri du plus récent au plus ancien
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
@@ -126,13 +118,54 @@ const getArticles = async (req, res) => {
       totalPages: Math.ceil(totalArticles / limit),
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
+    res.status(500).json({
+      status: "error",
+      message: "Erreur serveur",
+      error: error.message,
+    });
+  }
+};
+
+const getArticleCountByCategory = async (req, res) => {
+  try {
+    const categories = await Article.aggregate([
+      {
+        $group: {
+          _id: "$category",
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          category: "$_id",
+          count: 1,
+        },
+      },
+    ]);
+
+    if (!categories || categories.length === 0) {
+      return res.status(404).json({
         status: "error",
-        message: "Erreur serveur",
-        error: error.message,
+        message: "Aucune catégorie trouvée.",
       });
+    }
+
+    res.status(200).json({
+      status: "success",
+      message: "Nombre d'articles par catégorie récupéré avec succès.",
+      data: categories,
+    });
+  } catch (error) {
+    console.error(
+      "❌ Erreur lors de la récupération du nombre d'articles par catégorie :",
+      error
+    );
+    res.status(500).json({
+      status: "error",
+      message: "Une erreur est survenue lors de la récupération des données.",
+      error: error.message,
+    });
   }
 };
 
@@ -140,13 +173,11 @@ const getArticles = async (req, res) => {
 const getArticleBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
-    console.log(`🔍 Recherche de l'article avec le slug: ${slug}`);
 
     // Recherche de l'article avec insensibilité à la casse (si nécessaire)
     const article = await Article.findOne({ title: slug.toLowerCase() }).select(
       "title slug category fileUrl createdAt imlage author date"
     );
-    console.log({ article });
 
     if (!article) {
       return res.status(404).json({
@@ -408,7 +439,6 @@ const updateArticle = async (req, res) => {
 // Fonction pour vérifier si le slug existe déjà et générer un slug unique
 const checkOrGenerateSlug = async (req, res) => {
   let slug = req.params.slug.trim();
-  console.log({ slug });
   if (!slug) {
     return res.status(400).json({
       status: "error",
@@ -457,7 +487,6 @@ const generateUniqueSlug = async (baseSlug) => {
 
 // Fonction pour vérifier l'existence du fichier sur Cloudinary
 const checkCloudinaryExistence = async (slug) => {
-  console.log({ slug });
   try {
     const result = await cloudinary.search
       .expression(
@@ -469,51 +498,6 @@ const checkCloudinaryExistence = async (slug) => {
     return result.resources.length > 0;
   } catch (error) {
     throw new Error("Erreur lors de la recherche du fichier dans Cloudinary.");
-  }
-};
-
-// Fonction pour obtenir le nombre d'articles par catégorie
-const getArticleCountByCategory = async (req, res) => {
-  try {
-    // Récupérer toutes les catégories uniques
-    const categories = await Article.aggregate([
-      {
-        $group: {
-          _id: "$category", // Regroupement par catégorie
-          count: { $sum: 1 }, // Comptage du nombre d'articles dans chaque catégorie
-        },
-      },
-      {
-        $project: {
-          _id: 0, // Exclure l'ID
-          category: "$_id", // Renommer _id en category
-          count: 1, // Garder le champ count
-        },
-      },
-    ]);
-
-    if (!categories || categories.length === 0) {
-      return res.status(404).json({
-        status: "error",
-        message: "Aucune catégorie trouvée.",
-      });
-    }
-
-    res.status(200).json({
-      status: "success",
-      message: "Nombre d'articles par catégorie récupéré avec succès.",
-      data: categories,
-    });
-  } catch (error) {
-    console.error(
-      "❌ Erreur lors de la récupération du nombre d'articles par catégorie :",
-      error
-    );
-    res.status(500).json({
-      status: "error",
-      message: "Une erreur est survenue lors de la récupération des données.",
-      error: error.message,
-    });
   }
 };
 
