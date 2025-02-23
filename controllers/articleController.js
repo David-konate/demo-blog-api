@@ -204,7 +204,7 @@ const uploadImageTitle = async (req, res) => {
   try {
     const files = req.files;
     const slug = req.params.slug;
-
+    console.log("Fichiers reçus :", files);
     if (!files || !files.imageTitleData) {
       return res.status(400).json({
         status: "error",
@@ -325,7 +325,7 @@ const deleteArticle = async (req, res) => {
 const updateArticle = async (req, res) => {
   try {
     const { slug } = req.params;
-
+    console.log(req.files);
     if (!slug) {
       return res.status(400).json({
         status: "error",

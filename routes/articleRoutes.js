@@ -26,7 +26,7 @@ const {
 router.get("/articles", getArticles);
 router.get("/article/:slug", getArticleBySlug);
 router.post("/save/:slug", upload, uploadMarkdownFile);
-router.put("/update/:slug", updateArticle);
+router.put("/update/:slug", upload, updateArticle);
 router.delete("/article/:slug", deleteArticle);
 
 // Routes pour les images
