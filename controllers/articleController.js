@@ -88,6 +88,121 @@ const uploadMarkdownFile = async (req, res) => {
   }
 };
 
+// Fonction pour mettre à jour un article existant
+const updateArticle = async (req, res) => {
+  console.log("req.files", req);
+  try {
+    const { slug } = req.params;
+    console.log("req.files", req.files);
+    if (!slug) {
+      return res.status(400).json({
+        status: "error",
+        message: "Slug manquant.",
+      });
+    }
+
+    if (!req.files || Object.keys(req.files).length === 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "Aucun fichier reçuddddd.",
+      });
+    }
+
+    const markdownFile = req.files["markdown"]
+      ? req.files["markdown"][0]
+      : null;
+    if (!markdownFile) {
+      return res.status(400).json({
+        status: "error",
+        message: "Fichier Markdown manquant.",
+      });
+    }
+
+    // Fonction pour extraire les métadonnées depuis le fichier Markdown
+    const extractMetadata = (regex) => {
+      const match = markdownFile.buffer.toString().match(regex);
+      return match ? match[1] : null;
+    };
+
+    // Extraction des métadonnées
+    const author =
+      extractMetadata(/author:\s*"?(.+?)"?$/m) || "Auteur non trouvé";
+    const date = extractMetadata(/date:\s*"?(.+?)"?$/m) || "Date non trouvée";
+    const category =
+      extractMetadata(/category:\s*"?(.+?)"?$/m) || "Catégorie non trouvée";
+    const image = extractMetadata(/image:\s*"?(.+?)"?$/m);
+
+    // Téléchargement du fichier Markdown sur Cloudinary
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: "raw",
+        public_id: `${slug}.md`, // Identifiant du fichier
+        folder: `markdown_articles/${slug}`, // Dossier Cloudinary
+        overwrite: true, // Remplace l'ancien fichier
+      },
+      async (error, result) => {
+        if (error) {
+          console.error("❌ Erreur Cloudinary :", error);
+          return res.status(500).json({
+            status: "error",
+            message: "Erreur lors de la mise à jour sur Cloudinary.",
+            error: error.message,
+          });
+        }
+
+        // Mise à jour de l'article dans la base de données avec les nouvelles informations
+        try {
+          const updatedArticle = await Article.findOneAndUpdate(
+            { slug },
+            {
+              fileUrl: result.secure_url,
+              updatedAt: new Date(),
+              author, // Mise à jour de l'auteur
+              date, // Mise à jour de la date
+              category, // Mise à jour de la catégorie
+              image, // Mise à jour de l'image
+            },
+            { new: true }
+          );
+
+          if (!updatedArticle) {
+            return res.status(404).json({
+              status: "error",
+              message: "Article non trouvé.",
+            });
+          }
+
+          res.status(200).json({
+            status: "success",
+            message: "Fichier Markdown mis à jour avec succès.",
+            markdownUrl: result.secure_url,
+          });
+        } catch (err) {
+          console.error(
+            "❌ Erreur lors de la mise à jour dans la base de données :",
+            err
+          );
+          return res.status(500).json({
+            status: "error",
+            message: "Erreur lors de la mise à jour dans la base de données.",
+            error: err.message,
+          });
+        }
+      }
+    );
+
+    // Envoi du fichier vers Cloudinary
+    stream.end(markdownFile.buffer);
+  } catch (error) {
+    console.error("❌ Erreur lors de la mise à jour de l'article :", error);
+    res.status(500).json({
+      status: "error",
+      message:
+        "Une erreur est survenue lors de la mise à jour du fichier Markdown.",
+      error: error.message,
+    });
+  }
+};
 const getArticles = async (req, res) => {
   try {
     let { page = 1, category } = req.query;
@@ -175,7 +290,7 @@ const getArticleBySlug = async (req, res) => {
     const { slug } = req.params;
 
     // Recherche de l'article avec insensibilité à la casse (si nécessaire)
-    const article = await Article.findOne({ title: slug.toLowerCase() }).select(
+    const article = await Article.findOne({ slug: slug.toLowerCase() }).select(
       "title slug category fileUrl createdAt imlage author date"
     );
 
@@ -316,121 +431,6 @@ const deleteArticle = async (req, res) => {
     res.status(500).json({
       status: "error",
       message: "Erreur lors de la suppression de l'article.",
-      error: error.message,
-    });
-  }
-};
-
-// Fonction pour mettre à jour un article existant
-const updateArticle = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    console.log(req.files);
-    if (!slug) {
-      return res.status(400).json({
-        status: "error",
-        message: "Slug manquant.",
-      });
-    }
-
-    if (!req.files || Object.keys(req.files).length === 0) {
-      return res.status(400).json({
-        status: "error",
-        message: "Aucun fichier reçu.",
-      });
-    }
-
-    const markdownFile = req.files["markdown"]
-      ? req.files["markdown"][0]
-      : null;
-    if (!markdownFile) {
-      return res.status(400).json({
-        status: "error",
-        message: "Fichier Markdown manquant.",
-      });
-    }
-
-    // Fonction pour extraire les métadonnées depuis le fichier Markdown
-    const extractMetadata = (regex) => {
-      const match = markdownFile.buffer.toString().match(regex);
-      return match ? match[1] : null;
-    };
-
-    // Extraction des métadonnées
-    const author =
-      extractMetadata(/author:\s*"?(.+?)"?$/m) || "Auteur non trouvé";
-    const date = extractMetadata(/date:\s*"?(.+?)"?$/m) || "Date non trouvée";
-    const category =
-      extractMetadata(/category:\s*"?(.+?)"?$/m) || "Catégorie non trouvée";
-    const image = extractMetadata(/image:\s*"?(.+?)"?$/m);
-
-    // Téléchargement du fichier Markdown sur Cloudinary
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        resource_type: "raw",
-        public_id: `${slug}.md`, // Identifiant du fichier
-        folder: `markdown_articles/${slug}`, // Dossier Cloudinary
-        overwrite: true, // Remplace l'ancien fichier
-      },
-      async (error, result) => {
-        if (error) {
-          console.error("❌ Erreur Cloudinary :", error);
-          return res.status(500).json({
-            status: "error",
-            message: "Erreur lors de la mise à jour sur Cloudinary.",
-            error: error.message,
-          });
-        }
-
-        // Mise à jour de l'article dans la base de données avec les nouvelles informations
-        try {
-          const updatedArticle = await Article.findOneAndUpdate(
-            { slug },
-            {
-              fileUrl: result.secure_url,
-              updatedAt: new Date(),
-              author, // Mise à jour de l'auteur
-              date, // Mise à jour de la date
-              category, // Mise à jour de la catégorie
-              image, // Mise à jour de l'image
-            },
-            { new: true }
-          );
-
-          if (!updatedArticle) {
-            return res.status(404).json({
-              status: "error",
-              message: "Article non trouvé.",
-            });
-          }
-
-          res.status(200).json({
-            status: "success",
-            message: "Fichier Markdown mis à jour avec succès.",
-            markdownUrl: result.secure_url,
-          });
-        } catch (err) {
-          console.error(
-            "❌ Erreur lors de la mise à jour dans la base de données :",
-            err
-          );
-          return res.status(500).json({
-            status: "error",
-            message: "Erreur lors de la mise à jour dans la base de données.",
-            error: err.message,
-          });
-        }
-      }
-    );
-
-    // Envoi du fichier vers Cloudinary
-    stream.end(markdownFile.buffer);
-  } catch (error) {
-    console.error("❌ Erreur lors de la mise à jour de l'article :", error);
-    res.status(500).json({
-      status: "error",
-      message:
-        "Une erreur est survenue lors de la mise à jour du fichier Markdown.",
       error: error.message,
     });
   }
