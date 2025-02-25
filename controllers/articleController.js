@@ -3,9 +3,10 @@ const cloudinary = require("cloudinary").v2;
 
 const { Sequelize } = require("sequelize");
 const router = express.Router();
-const { Article } = require("../models/articleModel");
+const Article = require("../models/articleModel");
 
 const validator = require("validator");
+const Category = require("../models/categoryModel");
 
 const uploadMarkdownFile = async (req, res) => {
   try {
@@ -30,17 +31,25 @@ const uploadMarkdownFile = async (req, res) => {
         .status(400)
         .json({ status: "error", message: "Slug invalide." });
     }
-
     const extractMetadata = (regex) => {
       const match = markdownFile.buffer.toString().match(regex);
       return match ? match[1].trim() : null;
     };
+    const categoryString = extractMetadata(/category:\s*"?(.+?)"?$/m);
+    const categoryId = categoryString ? parseInt(categoryString, 10) : 0; // Conversion en entier
 
     const author = extractMetadata(/author:\s*"?(.+?)"?$/m) || "Auteur inconnu";
     const date =
       extractMetadata(/date:\s*"?(.+?)"?$/m) || new Date().toISOString();
-    const category = extractMetadata(/category:\s*"?(.+?)"?$/m) || "Non classé";
     const image = extractMetadata(/image:\s*"?(.+?)"?$/m) || "";
+
+    // // Vérification si la catégorie existe
+    const category = await Category.findByPk(categoryId);
+    if (!category) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Catégorie inexistante." });
+    }
 
     // Validation des métadonnées
     if (!validator.isAlpha(author.replace(/\s+/g, ""))) {
@@ -53,12 +62,6 @@ const uploadMarkdownFile = async (req, res) => {
       return res
         .status(400)
         .json({ status: "error", message: "Date invalide." });
-    }
-
-    if (!validator.isAlpha(category.replace(/\s+/g, ""))) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Catégorie invalide." });
     }
 
     const stream = cloudinary.uploader.upload_stream(
@@ -80,9 +83,9 @@ const uploadMarkdownFile = async (req, res) => {
           const article = await Article.create({
             title: slug.replace(/-/g, " "),
             slug,
+            categoryId, // Utilisation de l'ID de la catégorie
             author,
             date,
-            category,
             image,
             fileUrl: result.secure_url,
           });
@@ -96,7 +99,7 @@ const uploadMarkdownFile = async (req, res) => {
               slug: article.slug,
               author: article.author,
               date: article.date,
-              category: article.category,
+              categoryId: article.categoryId, // Renvoi de l'ID de la catégorie
               image: article.image,
               fileUrl: article.fileUrl,
             },
@@ -157,8 +160,7 @@ const updateArticle = async (req, res) => {
     const author =
       extractMetadata(/author:\s*"?(.+?)"?$/m) || "Auteur non trouvé";
     const date = extractMetadata(/date:\s*"?(.+?)"?$/m) || "Date non trouvée";
-    const category =
-      extractMetadata(/category:\s*"?(.+?)"?$/m) || "Catégorie non trouvée";
+    const categoryId = req.body.categoryId; // Receiving categoryId from the body
     const image = extractMetadata(/image:\s*"?(.+?)"?$/m);
 
     // Validation des champs extraits
@@ -174,10 +176,10 @@ const updateArticle = async (req, res) => {
         .json({ status: "error", message: "Date invalide." });
     }
 
-    if (!validator.isAlpha(category.replace(/\s+/g, ""))) {
+    if (!categoryId || isNaN(categoryId)) {
       return res
         .status(400)
-        .json({ status: "error", message: "Catégorie invalide." });
+        .json({ status: "error", message: "ID de catégorie invalide." });
     }
 
     const stream = cloudinary.uploader.upload_stream(
@@ -208,11 +210,20 @@ const updateArticle = async (req, res) => {
             });
           }
 
+          // Find the category using the categoryId
+          const category = await Category.findByPk(categoryId);
+          if (!category) {
+            return res.status(404).json({
+              status: "error",
+              message: "Catégorie non trouvée.",
+            });
+          }
+
           updatedArticle.fileUrl = result.secure_url;
           updatedArticle.updatedAt = new Date();
           updatedArticle.author = author;
           updatedArticle.date = date;
-          updatedArticle.category = category;
+          updatedArticle.categoryId = category.id; // Update with the category ID
           updatedArticle.image = image;
 
           await updatedArticle.save();
@@ -226,7 +237,7 @@ const updateArticle = async (req, res) => {
               slug: updatedArticle.slug,
               author: updatedArticle.author,
               date: updatedArticle.date,
-              category: updatedArticle.category,
+              categoryId: updatedArticle.categoryId,
               image: updatedArticle.image,
               fileUrl: updatedArticle.fileUrl,
             },
@@ -265,15 +276,22 @@ const getArticles = async (req, res) => {
       });
     }
 
-    const filter = category ? { category } : {};
+    const filter = category ? { categoryId: category } : {}; // Update to use categoryId for filtering
 
-    // Récupérer les articles avec pagination et filtre
+    // Récupérer les articles avec pagination, filtre et la catégorie associée
     const { rows: articles, count: totalArticles } =
       await Article.findAndCountAll({
         where: filter, // Appliquer le filtre (s'il existe)
         order: [["createdAt", "DESC"]], // Trier par date de création décroissante
         limit, // Limiter à 3 articles
         offset, // Calculer l'offset pour la pagination
+        include: [
+          {
+            model: Category, // Inclure la catégorie dans la requête
+            as: "category", // Alias pour la relation
+            attributes: ["id", "name"], // Choisir les attributs à inclure de la catégorie
+          },
+        ],
       });
 
     res.status(200).json({
@@ -339,19 +357,25 @@ const getArticleById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Recherche de l'article par ID
+    // Recherche de l'article par ID avec la catégorie associée
     const article = await Article.findOne({
       where: { id }, // Recherche par l'ID
       attributes: [
         "title",
         "slug",
-        "category",
         "fileUrl",
         "createdAt",
         "image",
         "author",
         "date",
       ], // Sélectionne les champs à retourner
+      include: [
+        {
+          model: Category, // Inclure la catégorie dans la requête
+          as: "category", // Alias pour la relation
+          attributes: ["id", "name"], // Choisir les attributs à inclure de la catégorie
+        },
+      ],
     });
 
     if (!article) {

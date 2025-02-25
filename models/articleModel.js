@@ -1,7 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../middlewares/Sequelize");
 const Category = require("./categoryModel");
-
 const Article = sequelize.define(
   "Article",
   {
@@ -39,10 +38,10 @@ const Article = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    authorId: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
+    // authorId: {
+    //   type: DataTypes.STRING,
+    //   allowNull: false,
+    // },
     date: {
       type: DataTypes.STRING,
       allowNull: false,
