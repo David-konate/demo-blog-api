@@ -1,0 +1,9 @@
+const sequelize = require("../middlewares/Sequelize"); 
+const Category = require("./categoryModel");
+const Article = require("./articleModel");
+
+// Définir les relations ici après avoir importé les modèles
+Category.hasMany(Article, { foreignKey: "categoryId", as: "articles" });
+Article.belongsTo(Category, { foreignKey: "categoryId", as: "category" });
+
+module.exports = { sequelize, Category, Article };

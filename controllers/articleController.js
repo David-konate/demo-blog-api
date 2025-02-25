@@ -1,15 +1,15 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const cloudinary = require("cloudinary").v2;
 
-const getArticlePipeline = require("../utils/articlePipeline"); // Remplacer import par require
-
+const { Sequelize } = require("sequelize");
 const router = express.Router();
-const Article = require("../models/articleModel"); // Chemin relatif vers votre modèle Article
+const { Article } = require("../models/articleModel");
+
+const validator = require("validator");
 
 const uploadMarkdownFile = async (req, res) => {
   try {
-    const markdownFile = req.files?.markdown?.[0]; // Vérification correcte du fichier
+    const markdownFile = req.files?.markdown?.[0];
     const slug = req.params.slug;
 
     if (!markdownFile) {
@@ -24,6 +24,13 @@ const uploadMarkdownFile = async (req, res) => {
         .json({ status: "error", message: "Slug manquant." });
     }
 
+    // Validation du slug
+    if (!validator.isSlug(slug)) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Slug invalide." });
+    }
+
     const extractMetadata = (regex) => {
       const match = markdownFile.buffer.toString().match(regex);
       return match ? match[1].trim() : null;
@@ -34,6 +41,25 @@ const uploadMarkdownFile = async (req, res) => {
       extractMetadata(/date:\s*"?(.+?)"?$/m) || new Date().toISOString();
     const category = extractMetadata(/category:\s*"?(.+?)"?$/m) || "Non classé";
     const image = extractMetadata(/image:\s*"?(.+?)"?$/m) || "";
+
+    // Validation des métadonnées
+    if (!validator.isAlpha(author.replace(/\s+/g, ""))) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Auteur invalide." });
+    }
+
+    if (!validator.isDate(date)) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Date invalide." });
+    }
+
+    if (!validator.isAlpha(category.replace(/\s+/g, ""))) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Catégorie invalide." });
+    }
 
     const stream = cloudinary.uploader.upload_stream(
       {
@@ -51,8 +77,8 @@ const uploadMarkdownFile = async (req, res) => {
         }
 
         try {
-          const article = new Article({
-            title: slug.replace(/-/g, " "), // Utiliser le slug comme titre par défaut
+          const article = await Article.create({
+            title: slug.replace(/-/g, " "),
             slug,
             author,
             date,
@@ -61,17 +87,24 @@ const uploadMarkdownFile = async (req, res) => {
             fileUrl: result.secure_url,
           });
 
-          await article.save();
-
           res.status(201).json({
             status: "success",
             message: "Article enregistré avec succès.",
-            article,
+            article: {
+              id: article.id,
+              title: article.title,
+              slug: article.slug,
+              author: article.author,
+              date: article.date,
+              category: article.category,
+              image: article.image,
+              fileUrl: article.fileUrl,
+            },
           });
         } catch (err) {
           return res.status(500).json({
             status: "error",
-            message: "Erreur MongoDB",
+            message: "Erreur base de données",
             error: err.message,
           });
         }
@@ -90,10 +123,8 @@ const uploadMarkdownFile = async (req, res) => {
 
 // Fonction pour mettre à jour un article existant
 const updateArticle = async (req, res) => {
-  console.log("req.files", req);
   try {
     const { slug } = req.params;
-    console.log("req.files", req.files);
     if (!slug) {
       return res.status(400).json({
         status: "error",
@@ -104,7 +135,7 @@ const updateArticle = async (req, res) => {
     if (!req.files || Object.keys(req.files).length === 0) {
       return res.status(400).json({
         status: "error",
-        message: "Aucun fichier reçuddddd.",
+        message: "Aucun fichier reçu.",
       });
     }
 
@@ -118,13 +149,11 @@ const updateArticle = async (req, res) => {
       });
     }
 
-    // Fonction pour extraire les métadonnées depuis le fichier Markdown
     const extractMetadata = (regex) => {
       const match = markdownFile.buffer.toString().match(regex);
       return match ? match[1] : null;
     };
 
-    // Extraction des métadonnées
     const author =
       extractMetadata(/author:\s*"?(.+?)"?$/m) || "Auteur non trouvé";
     const date = extractMetadata(/date:\s*"?(.+?)"?$/m) || "Date non trouvée";
@@ -132,17 +161,34 @@ const updateArticle = async (req, res) => {
       extractMetadata(/category:\s*"?(.+?)"?$/m) || "Catégorie non trouvée";
     const image = extractMetadata(/image:\s*"?(.+?)"?$/m);
 
-    // Téléchargement du fichier Markdown sur Cloudinary
+    // Validation des champs extraits
+    if (!validator.isAlpha(author.replace(/\s+/g, ""))) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Auteur invalide." });
+    }
+
+    if (!validator.isDate(date)) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Date invalide." });
+    }
+
+    if (!validator.isAlpha(category.replace(/\s+/g, ""))) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Catégorie invalide." });
+    }
+
     const stream = cloudinary.uploader.upload_stream(
       {
         resource_type: "raw",
-        public_id: `${slug}.md`, // Identifiant du fichier
-        folder: `markdown_articles/${slug}`, // Dossier Cloudinary
-        overwrite: true, // Remplace l'ancien fichier
+        public_id: `${slug}.md`,
+        folder: `markdown_articles/${slug}`,
+        overwrite: true,
       },
       async (error, result) => {
         if (error) {
-          console.error("❌ Erreur Cloudinary :", error);
           return res.status(500).json({
             status: "error",
             message: "Erreur lors de la mise à jour sur Cloudinary.",
@@ -150,20 +196,10 @@ const updateArticle = async (req, res) => {
           });
         }
 
-        // Mise à jour de l'article dans la base de données avec les nouvelles informations
         try {
-          const updatedArticle = await Article.findOneAndUpdate(
-            { slug },
-            {
-              fileUrl: result.secure_url,
-              updatedAt: new Date(),
-              author, // Mise à jour de l'auteur
-              date, // Mise à jour de la date
-              category, // Mise à jour de la catégorie
-              image, // Mise à jour de l'image
-            },
-            { new: true }
-          );
+          const updatedArticle = await Article.findOne({
+            where: { slug },
+          });
 
           if (!updatedArticle) {
             return res.status(404).json({
@@ -172,16 +208,30 @@ const updateArticle = async (req, res) => {
             });
           }
 
+          updatedArticle.fileUrl = result.secure_url;
+          updatedArticle.updatedAt = new Date();
+          updatedArticle.author = author;
+          updatedArticle.date = date;
+          updatedArticle.category = category;
+          updatedArticle.image = image;
+
+          await updatedArticle.save();
+
           res.status(200).json({
             status: "success",
-            message: "Fichier Markdown mis à jour avec succès.",
-            markdownUrl: result.secure_url,
+            message: "Article mis à jour avec succès.",
+            article: {
+              id: updatedArticle.id,
+              title: updatedArticle.title,
+              slug: updatedArticle.slug,
+              author: updatedArticle.author,
+              date: updatedArticle.date,
+              category: updatedArticle.category,
+              image: updatedArticle.image,
+              fileUrl: updatedArticle.fileUrl,
+            },
           });
         } catch (err) {
-          console.error(
-            "❌ Erreur lors de la mise à jour dans la base de données :",
-            err
-          );
           return res.status(500).json({
             status: "error",
             message: "Erreur lors de la mise à jour dans la base de données.",
@@ -191,39 +241,40 @@ const updateArticle = async (req, res) => {
       }
     );
 
-    // Envoi du fichier vers Cloudinary
     stream.end(markdownFile.buffer);
   } catch (error) {
-    console.error("❌ Erreur lors de la mise à jour de l'article :", error);
     res.status(500).json({
       status: "error",
-      message:
-        "Une erreur est survenue lors de la mise à jour du fichier Markdown.",
+      message: "Une erreur est survenue lors de la mise à jour.",
       error: error.message,
     });
   }
 };
+
 const getArticles = async (req, res) => {
   try {
     let { page = 1, category } = req.query;
     page = parseInt(page, 10);
     const limit = 3;
-    const skip = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
     if (isNaN(page) || page < 1) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Page invalide." });
+      return res.status(400).json({
+        status: "error",
+        message: "Page invalide.",
+      });
     }
 
     const filter = category ? { category } : {};
 
-    const articles = await Article.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const totalArticles = await Article.countDocuments(filter);
+    // Récupérer les articles avec pagination et filtre
+    const { rows: articles, count: totalArticles } =
+      await Article.findAndCountAll({
+        where: filter, // Appliquer le filtre (s'il existe)
+        order: [["createdAt", "DESC"]], // Trier par date de création décroissante
+        limit, // Limiter à 3 articles
+        offset, // Calculer l'offset pour la pagination
+      });
 
     res.status(200).json({
       status: "success",
@@ -243,21 +294,14 @@ const getArticles = async (req, res) => {
 
 const getArticleCountByCategory = async (req, res) => {
   try {
-    const categories = await Article.aggregate([
-      {
-        $group: {
-          _id: "$category",
-          count: { $sum: 1 },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          category: "$_id",
-          count: 1,
-        },
-      },
-    ]);
+    const categories = await Article.findAll({
+      attributes: [
+        "category", // Sélectionne la catégorie
+        [Sequelize.fn("COUNT", Sequelize.col("category")), "count"], // Compte le nombre d'articles par catégorie
+      ],
+      group: ["category"], // Regroupe par catégorie
+      raw: true, // Retourne le résultat sous forme d'objet simple
+    });
 
     if (!categories || categories.length === 0) {
       return res.status(404).json({
@@ -266,10 +310,16 @@ const getArticleCountByCategory = async (req, res) => {
       });
     }
 
+    // Structure du résultat pour correspondre à la réponse attendue
+    const result = categories.map((category) => ({
+      category: category.category,
+      count: category.count,
+    }));
+
     res.status(200).json({
       status: "success",
       message: "Nombre d'articles par catégorie récupéré avec succès.",
-      data: categories,
+      data: result,
     });
   } catch (error) {
     console.error(
@@ -284,15 +334,25 @@ const getArticleCountByCategory = async (req, res) => {
   }
 };
 
-// Fonction pour récupérer un article spécifique par son slug
-const getArticleBySlug = async (req, res) => {
+// Fonction pour récupérer un article spécifique par son ID
+const getArticleById = async (req, res) => {
   try {
-    const { slug } = req.params;
+    const { id } = req.params;
 
-    // Recherche de l'article avec insensibilité à la casse (si nécessaire)
-    const article = await Article.findOne({ slug: slug.toLowerCase() }).select(
-      "title slug category fileUrl createdAt imlage author date"
-    );
+    // Recherche de l'article par ID
+    const article = await Article.findOne({
+      where: { id }, // Recherche par l'ID
+      attributes: [
+        "title",
+        "slug",
+        "category",
+        "fileUrl",
+        "createdAt",
+        "image",
+        "author",
+        "date",
+      ], // Sélectionne les champs à retourner
+    });
 
     if (!article) {
       return res.status(404).json({
@@ -300,6 +360,7 @@ const getArticleBySlug = async (req, res) => {
         message: "Article non trouvé",
       });
     }
+
     res.status(200).json({
       status: "success",
       data: article,
@@ -390,32 +451,30 @@ const uploadImageTitle = async (req, res) => {
 
 // Fonction pour supprimer un article (Markdown + images associées)
 const deleteArticle = async (req, res) => {
-  const { slug } = req.params;
+  const { id } = req.params;
 
   try {
-    if (!slug) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Slug manquant." });
+    if (!id) {
+      return res.status(400).json({ status: "error", message: "ID manquant." });
     }
 
     // Suppression du fichier Markdown
     await cloudinary.api.delete_resources_by_prefix(
-      `markdown_articles/${slug}/`,
+      `markdown_articles/${id}/`,
       { resource_type: "raw" }
     );
 
     // Suppression des images associées
     await cloudinary.api.delete_resources_by_prefix(
-      `markdown_articles/${slug}/`,
+      `markdown_articles/${id}/`,
       { resource_type: "image" }
     );
 
     // Suppression du dossier (s'il est vide)
-    await cloudinary.api.delete_folder(`markdown_articles/${slug}`);
+    await cloudinary.api.delete_folder(`markdown_articles/${id}`);
 
     // Suppression de l'article dans la base de données
-    const deletedArticle = await Article.findOneAndDelete({ slug });
+    const deletedArticle = await Article.destroy({ where: { id } });
     if (!deletedArticle) {
       return res
         .status(404)
@@ -504,7 +563,7 @@ const checkCloudinaryExistence = async (slug) => {
 module.exports = {
   getArticleCountByCategory,
   getArticles,
-  getArticleBySlug,
+  getArticleById,
   uploadImageTitle,
   uploadMarkdownFile,
   checkOrGenerateSlug,

@@ -3,7 +3,8 @@ const cloudinary = require("cloudinary").v2;
 const cors = require("cors");
 const app = express();
 const articleRoutes = require("./routes/articleRoutes");
-const connectDB = require("./mongoConfig");
+const categoryRoutes = require("./routes/categoryRoutes");
+const sequelize = require("./middlewares/Sequelize");
 require("dotenv").config();
 
 // Configuration de Cloudinary
@@ -53,6 +54,9 @@ app.options("*", (req, res) => {
   res.sendStatus(204);
 });
 
+// Middleware pour parser le corps des requêtes JSON
+app.use(express.json());
+
 // Route principale
 app.get("/", (req, res) => {
   res.send("Hello, API blog!");
@@ -60,9 +64,26 @@ app.get("/", (req, res) => {
 
 // Routes des articles
 app.use("/api", articleRoutes);
+app.use("/api", categoryRoutes);
 
-// Connexion à MongoDB
-connectDB();
+// Test de connexion MySQL
+sequelize
+  .authenticate()
+  .then(() => {
+    console.log("Connexion à la base de données MySQL réussie");
+  })
+  .catch((err) => {
+    console.error("Impossible de se connecter à la base de données:", err);
+  });
+
+sequelize
+  .sync()
+  .then(() => {
+    console.log("Tables synchronisées");
+  })
+  .catch((err) => {
+    console.error("Erreur de synchronisation des tables:", err);
+  });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

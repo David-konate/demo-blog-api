@@ -1,20 +1,61 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../middlewares/Sequelize");
+const Category = require("./categoryModel");
 
-const articleSchema = new mongoose.Schema(
+const Article = sequelize.define(
+  "Article",
   {
-    title: { type: String, required: true },
-    slug: { type: String, required: true, unique: true },
-    category: { type: String, required: false },
-    fileUrl: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now },
-    image: { type: String },
-    author: { type: String, required: true },
-    date: { type: String, required: true },
-    protected: { type: Boolean, default: false },
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    title: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    slug: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
+    categoryId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: "categories", // Utilisation du nom de la table pour éviter le problème d'import
+        key: "id",
+      },
+    },
+    fileUrl: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    image: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    authorId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    date: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    protected: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    tableName: "articles",
+  }
 );
-
-const Article = mongoose.model("Article", articleSchema);
 
 module.exports = Article;

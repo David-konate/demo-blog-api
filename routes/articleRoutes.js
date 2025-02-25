@@ -2,18 +2,16 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 
-// Configuration de multer (stockage en mémoire pour Cloudinary)
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage }).fields([
-  { name: "markdown", maxCount: 1 }, // Fichier Markdown
-  { name: "imagesData", maxCount: 10 }, // Images des sections
-  { name: "imageTitleData", maxCount: 1 }, // Image principale
-]);
+// Importation des validateurs
+const {
+  createArticleValidator,
+  updateArticleValidator,
+} = require("../validators/articleValidator");
 
 // Importation des contrôleurs
 const {
   getArticles,
-  getArticleBySlug,
+  getArticleById,
   uploadImageTitle,
   uploadMarkdownFile,
   checkOrGenerateSlug,
@@ -22,11 +20,19 @@ const {
   getArticleCountByCategory,
 } = require("../controllers/articleController");
 
+// Configuration de multer (stockage en mémoire pour Cloudinary)
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage }).fields([
+  { name: "markdown", maxCount: 1 }, // Fichier Markdown
+  { name: "imagesData", maxCount: 10 }, // Images des sections
+  { name: "imageTitleData", maxCount: 1 }, // Image principale
+]);
+
 // Routes pour les articles
 router.get("/articles", getArticles);
-router.get("/article/:slug", getArticleBySlug);
-router.post("/save/:slug", upload, uploadMarkdownFile);
-router.put("/update/:slug", upload, updateArticle);
+router.get("/article/:id", getArticleById);
+router.post("/save/:slug", upload, createArticleValidator, uploadMarkdownFile);
+router.put("/update/:slug", upload, updateArticleValidator, updateArticle);
 router.delete("/article/:slug", deleteArticle);
 
 // Routes pour les images
