@@ -276,7 +276,11 @@ const getArticles = async (req, res) => {
       });
     }
 
-    const filter = category ? { categoryId: category } : {}; // Update to use categoryId for filtering
+    // Si category est non défini ou null, on n'applique pas de filtre sur categoryId
+    const filter =
+      category === undefined || category === null || category === ""
+        ? {} // Ne pas filtrer si category est null, non défini ou chaîne vide
+        : { categoryId: category }; // Appliquer le filtre sur categoryId si une catégorie est spécifiée
 
     // Récupérer les articles avec pagination, filtre et la catégorie associée
     const { rows: articles, count: totalArticles } =
@@ -289,7 +293,7 @@ const getArticles = async (req, res) => {
           {
             model: Category, // Inclure la catégorie dans la requête
             as: "category", // Alias pour la relation
-            attributes: ["id", "name"], // Choisir les attributs à inclure de la catégorie
+            attributes: ["id", "label_category"], // Choisir les attributs à inclure de la catégorie
           },
         ],
       });
@@ -312,13 +316,26 @@ const getArticles = async (req, res) => {
 
 const getArticleCountByCategory = async (req, res) => {
   try {
+    // Effectuer la requête de comptage des articles par catégorie, y compris les articles sans catégorie (categoryId = null)
     const categories = await Article.findAll({
       attributes: [
-        "category", // Sélectionne la catégorie
-        [Sequelize.fn("COUNT", Sequelize.col("category")), "count"], // Compte le nombre d'articles par catégorie
+        [
+          Sequelize.literal(
+            'IFNULL(`Category`.`label_category`, "Non catégorisé")'
+          ),
+          "category", // Utilisation de label_category de la table Category
+        ], // Utilisation de IFNULL pour gérer les valeurs nulles
+        [Sequelize.fn("COUNT", Sequelize.col("Article.categoryId")), "count"], // Compter le nombre d'articles par catégorie
       ],
-      group: ["category"], // Regroupe par catégorie
-      raw: true, // Retourne le résultat sous forme d'objet simple
+      group: ["Article.categoryId", "Category.label_category"], // Regrouper par categoryId et label_category
+      raw: true, // Retourner les résultats sous forme d'objet simple
+      include: [
+        {
+          model: Category, // Inclusion de la table Category pour récupérer le label_category
+          as: "category", // Alias pour la relation
+          attributes: [], // Ne pas inclure d'autres attributs de Category, seulement label_category est utilisé dans le SELECT
+        },
+      ],
     });
 
     if (!categories || categories.length === 0) {
@@ -530,7 +547,7 @@ const checkOrGenerateSlug = async (req, res) => {
   }
 
   try {
-    const slugExists = await checkCloudinaryExistence(slug);
+    const slugExists = await checkSlugExistence(slug);
 
     if (slugExists) {
       const uniqueSlug = await generateUniqueSlug(slug);
@@ -568,19 +585,18 @@ const generateUniqueSlug = async (baseSlug) => {
   return slug;
 };
 
-// Fonction pour vérifier l'existence du fichier sur Cloudinary
-const checkCloudinaryExistence = async (slug) => {
+// Fonction pour vérifier l'existence du slug dans la base de données
+const checkSlugExistence = async (slug) => {
   try {
-    const result = await cloudinary.search
-      .expression(
-        `resource_type:raw AND public_id:markdown_articles/${slug}/${slug}.md`
-      )
-      .max_results(1)
-      .execute();
+    // Recherche dans la base de données pour un article avec le slug spécifié
+    const article = await Article.findOne({ where: { slug } });
 
-    return result.resources.length > 0;
+    // Si un article avec ce slug existe, renvoie true, sinon false
+    return article !== null;
   } catch (error) {
-    throw new Error("Erreur lors de la recherche du fichier dans Cloudinary.");
+    throw new Error(
+      "Erreur lors de la recherche du slug dans la base de données."
+    );
   }
 };
 

@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../middlewares/Sequelize");
 const Category = require("./categoryModel");
+
 const Article = sequelize.define(
   "Article",
   {
@@ -38,10 +39,6 @@ const Article = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    // authorId: {
-    //   type: DataTypes.STRING,
-    //   allowNull: false,
-    // },
     date: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -56,5 +53,8 @@ const Article = sequelize.define(
     tableName: "articles",
   }
 );
+
+// Définir l'association entre Article et Category
+Article.belongsTo(Category, { foreignKey: "categoryId", as: "category" });
 
 module.exports = Article;
